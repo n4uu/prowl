@@ -150,7 +150,7 @@ and up get `to_ids`.
 | domain | URLhaus, ThreatFox | URLs, other reports |
 
 Shared hosting and benign services are never pivoted through. Depth (2) and
-node count (400) are capped. ASN lookups run for every address, including
+the number of nodes pivoting may add on top of the seeds (400) are capped. ASN lookups run for every address, including
 ones past the depth limit, since that's what decides whether an address is
 a CDN edge.
 
@@ -161,6 +161,65 @@ transport. That request goes to the suspected C2 from your address, so it's
 off by default; send it through infrastructure you've checked (see
 [wireguardian](https://github.com/n4uu/wireguardian)). `prowl probe
 ip:port` does the same for a single target.
+
+## A real run
+
+On 2 November 2026, `prowl hunt -no-dns` with the builtin profile and default
+depth (2). With `-no-dns` the only hosts contacted are the abuse.ch APIs and
+crt.sh.
+
+- **Seeds:** 372 distinct IOCs from 15 ThreatFox queries (7 family names,
+  8 tags).
+- **Pivots:** 111 URLhaus and 111 ThreatFox lookups, 58 crt.sh queries.
+  One crt.sh query came back 404 and was skipped. 562 nodes, 342 edges.
+- **Exported:** 244 indicators at `likely` or above, 113 at `very-likely`
+  or above. Six came from pivoting rather than a report: three URLs on
+  `api.recapcha[.]fun` from URLhaus and three `www.` names from current
+  certificates of reported domains.
+- **Kept out:** 73 `vercel.app` subdomains and a handful on Railway,
+  jsonkeeper, npoint, mocki and jsonsilo (the URLs on them are exported, the
+  domains aren't), plus `hxxps://tronscan[.]org/`, filed on ThreatFox under
+  this campaign because EtherHiding loaders read from the TRON chain.
+
+Top of the list:
+
+| p | Indicator | Why |
+| --- | --- | --- |
+| >.99 | `104.234.94[.]197:1244` and `:2225` | BeaverTail C2, seven InvisibleFerret-style paths (`/client/36/346`, `/brow/...`, `/ldb/...`) on the same port |
+| >.99 | `151.80.76[.]67:1224`, `51.210.52[.]212:1224` | `/api/checkStatus` on the BeaverTail port |
+| >.99 | `80.190.73[.]17:5000` | OtterCandy C2 |
+| >.99 | `138.226.247[.]152:80` | OtterCookie C2, confidence 95 |
+| >.99 | `hxxp://84.200.33[.]163/302/parser.js` and four siblings | ContagiousDrop payloads |
+| >.99 | `166.88.134[.]75:443` | tagged ContagiousInterview, malware unknown |
+| 0.98 | `cryptifyhub[.]cloud` | ContagiousDrop delivery on port 6168 |
+| 0.93 | `172.86.112[.]154:8085`, `:8086`, `:8087` | OtterCookie upload and socket.io ports |
+
+Reviewed by hand: nothing near the top is a CDN, a cloud front end or a
+shared host; the top is VPS addresses with direct family reports and the
+URLs on them. Without DNS there is no ASN check, so that review is the
+only CDN filter in this mode. One thing worth knowing when reading the
+list: a bare address with three reported ports scores higher than any
+of the ports (`172.86.125[.]61` is 0.98 while each `:808x` is 0.75),
+because the three `same_host` links count as corroboration even though
+they usually come from one report.
+
+The first attempt at this run found these problems, all fixed:
+
+- Seeding alone returned more IOCs than `-max-nodes`, so the hunt stopped
+  before its first pivot. The cap now counts only nodes added by pivoting.
+- The profile was missing four ThreatFox family names with reports tagged
+  ContagiousInterview (`win.beavertail`, `osx.beavertail`, `js.ottercandy`,
+  `js.contagious_drop`) and the `contagious-interview` tag spelling, which
+  ThreatFox's exact-match tag query treats as a different tag. 40 more
+  distinct seeds.
+- A domain reported in 2026 pulled in `jenkins.`, `gitlab.` and
+  `cloudbees-cd.` hosts of what looks like an unrelated company, through a
+  certificate that expired in 2022. Certificates that expired before the
+  `-since` window are now ignored (189 in this run).
+- The front page of a legitimate service was exportable. Railway, mocki
+  and jsonsilo were missing from shared hosting.
+- The STIX export emitted one malware object per profile entry instead of
+  per family, with an empty Malpedia link for families that have none.
 
 ## Reproducible hunts
 
@@ -193,6 +252,7 @@ export ABUSECH_AUTH_KEY=...                      # free: https://auth.abuse.ch/
 ./bin/prowl hunt                                 # seed from the profile, depth 2
 ./bin/prowl hunt -no-seed -depth 3 api.c2.example 203.0.113.9:1418   # start from your own IOCs
 ./bin/prowl hunt -seeds iocs.txt                 # one per line, defanged is fine
+./bin/prowl hunt -no-dns                         # abuse.ch and crt.sh only, see below
 ./bin/prowl explain 203.0.113.9
 ./bin/prowl export -format stix -tlp green > bundle.json
 ./bin/prowl profile contagious-interview > my-profile.yaml   # copy and edit
@@ -201,6 +261,12 @@ export ABUSECH_AUTH_KEY=...                      # free: https://auth.abuse.ch/
 
 Without a key, ThreatFox and URLhaus are skipped and so is profile seeding;
 crt.sh, DNS and Team Cymru still work from indicators you give it.
+
+`-no-dns` turns off A/AAAA, PTR and Team Cymru lookups. Resolving a suspect
+domain can end at a name server the operator runs, so this is the mode for
+when nothing at all may reach their infrastructure. The cost is the CDN
+check: without an ASN, an address is only recognised as shared if the
+profile's lists catch it, so review the output with that in mind.
 
 Output, in `-out` (default `prowl-out/`):
 
