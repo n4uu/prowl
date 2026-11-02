@@ -1,0 +1,141 @@
+# Campaign profile: Contagious Interview (DPRK fake job interviews).
+#
+# Everything prowl knows about the campaign lives here, not in code: which
+# malware families and tags seed a hunt, which ports and paths are
+# characteristic, which hosting is shared and must not be blocked as a
+# domain, and how much each kind of evidence is worth. Copy this file, edit
+# it, and pass it with -profile to hunt something else.
+#
+# Likelihood ratios (lr) are how much more often a signal shows up on this
+# campaign's infrastructure than on an arbitrary host prowl might pivot to.
+# They are judgement calls, written down so they can be argued with.
+
+name: contagious-interview
+description: >
+  North Korean fake job interview operations delivering BeaverTail,
+  InvisibleFerret and OtterCookie through trojanised coding tests, npm
+  packages and VS Code project files.
+
+actor:
+  name: Contagious Interview
+  aliases:
+    - Famous Chollima      # CrowdStrike
+    - WaterPlum            # NTT Security
+    - DeceptiveDevelopment # ESET
+    - UNC5342              # Google Threat Intelligence Group
+    - CL-STA-0240          # Palo Alto Unit 42
+    - Void Dokkaebi        # Trend Micro
+
+families:
+  # ThreatFox/Malpedia names. ThreatFox files OtterCookie as js.otter_cookie.
+  - name: OtterCookie
+    threatfox: js.otter_cookie
+    malpedia: https://malpedia.caad.fkie.fraunhofer.de/details/js.otter_cookie
+  - name: BeaverTail
+    threatfox: js.beavertail
+    malpedia: https://malpedia.caad.fkie.fraunhofer.de/details/js.beavertail
+  - name: InvisibleFerret
+    threatfox: py.invisibleferret
+    malpedia: https://malpedia.caad.fkie.fraunhofer.de/details/py.invisibleferret
+
+# Tags used by ThreatFox and URLhaus reporters for this activity. Matching is
+# case-insensitive and ignores spaces, dashes and underscores.
+tags:
+  - OtterCookie
+  - BeaverTail
+  - InvisibleFerret
+  - ContagiousInterview
+  - FamousChollima
+  - WaterPlum
+  - DeceptiveDevelopment
+
+ports:
+  1418: OtterCookie socket.io listener (Cisco Talos)
+  1224: BeaverTail / InvisibleFerret HTTP (MITRE S1246)
+  1244: BeaverTail / InvisibleFerret HTTP (MITRE S1246, ANY.RUN)
+  1245: InvisibleFerret HTTP (ANY.RUN)
+
+paths:
+  /pdown: BeaverTail portable Python download (ANY.RUN)
+  /keys: InvisibleFerret next stage (ANY.RUN)
+  /uploads: BeaverTail / OtterCookie exfiltration (MITRE S1246)
+  /upload: OtterCookie v4 upload module (Elastic)
+  /cldbs: OtterCookie v4 browser database upload (Elastic)
+  /brow: InvisibleFerret browser module (ANY.RUN)
+  /bow: InvisibleFerret browser module (ANY.RUN)
+  /socket.io/: OtterCookie socket.io transport
+
+# Services the campaign abuses but doesn't own. A URL on them is an
+# indicator; the domain is not, and it's never pivoted through (crt.sh and
+# DNS on vercel.app would pull in half the internet).
+shared_hosting:
+  - vercel.app
+  - onrender.com
+  - netlify.app
+  - glitch.me
+  - workers.dev
+  - pages.dev
+  - herokuapp.com
+  - github.io
+  - githubusercontent.com
+  - gitlab.io
+  - npoint.io
+  - jsonkeeper.com
+  - pastebin.com
+  - ngrok-free.app
+  - ngrok.io
+  - trycloudflare.com
+
+# Networks that front for many unrelated customers (CDNs). An address in
+# one of these never inherits a score from a domain that resolves to it,
+# and never passes one on.
+shared_asns:
+  13335: Cloudflare
+  54113: Fastly
+  20940: Akamai
+  16625: Akamai
+
+# Never an indicator, whatever shows up next to it.
+benign:
+  - github.com
+  - gitlab.com
+  - bitbucket.org
+  - npmjs.com
+  - npmjs.org
+  - registry.npmjs.org
+  - nodejs.org
+  - google.com
+  - microsoft.com
+  - cloudflare.com
+  - ipinfo.io
+  - ip-api.com
+  - api.ipify.org
+
+scoring:
+  prior: 0.02          # chance an arbitrary pivoted host belongs to the campaign
+  half_life_days: 120  # sightings lose half their weight every 4 months
+  group_decay: 0.5     # 2nd signal in the same group counts half, 3rd a quarter...
+  # A reporter filing an IOC under one of these families on ThreatFox is
+  # strong evidence (attribution mistakes happen, but rarely for C2 of a
+  # niche family); a bare port number is weak. Strength (ThreatFox
+  # confidence, neighbour probability) scales the log of the ratio.
+  evidence:
+    threatfox_family: {lr: 800,  group: threatfox}
+    threatfox_tag:    {lr: 150,  group: threatfox}
+    urlhaus_tag:      {lr: 200,  group: urlhaus}
+    urlhaus_listed:   {lr: 3,    group: urlhaus}
+    c2_port:          {lr: 4,    group: structure}
+    c2_path:          {lr: 8,    group: structure}
+    engineio_live:    {lr: 20,   group: active}
+    # Infrastructure links, scaled by the neighbour's own probability.
+    # same_host: an address whose port (or a URL on that port) is C2.
+    # shares_cert: one certificate, so one ACME account / one operator,
+    # diluted when the certificate covers many names.
+    same_host:        {lr: 400,  group: infrastructure}
+    shares_cert:      {lr: 300,  group: infrastructure}
+    resolves_to:      {lr: 150,  group: infrastructure}
+    co_hosted:        {lr: 12,   group: infrastructure}
+    same_prefix:      {lr: 2,    group: infrastructure}
+    asn_cluster:      {lr: 1.5,  group: infrastructure}
+    shared_hosting:   {lr: 0.2,  group: context}
+    benign_service:   {lr: 0.002, group: context}
