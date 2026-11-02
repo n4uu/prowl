@@ -144,7 +144,11 @@ func normTag(t string) string {
 func (p *Profile) MatchTags(tags []string) []string {
 	want := map[string]string{}
 	for _, t := range p.Tags {
-		want[normTag(t)] = t
+		// The first spelling is canonical; later ones only exist so
+		// seeding can query ThreatFox's exact-match taginfo.
+		if _, ok := want[normTag(t)]; !ok {
+			want[normTag(t)] = t
+		}
 	}
 	var out []string
 	seen := map[string]bool{}

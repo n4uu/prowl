@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/n4uu/prowl/internal/graph"
+	"github.com/n4uu/prowl/internal/ioc"
 	"github.com/n4uu/prowl/internal/profile"
 )
 
@@ -93,5 +94,28 @@ func TestTiers(t *testing.T) {
 	}
 	if TierRank("likely") <= TierRank("unlikely") || TierRank("bogus") != -1 {
 		t.Error("TierRank ordering")
+	}
+}
+
+// ThreatFox has the front page of a block explorer filed under this
+// campaign (EtherHiding reads the next stage from chain). Exporting it would
+// block the whole service; a deep URL on the same service stays.
+func TestBenignFrontPage(t *testing.T) {
+	p, err := profile.Load("contagious-interview")
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := graph.New(p.Name)
+	root, _ := g.Add(ioc.MustParse("https://tronscan.org/"), 0, "seed")
+	deep, _ := g.Add(ioc.MustParse("https://github.com/attacker-example/tasks/raw/main/run.sh"), 0, "seed")
+	for _, n := range []*graph.Node{root, deep} {
+		n.Exportable = true
+		structural(n, p)
+	}
+	if root.Exportable || root.NoExport != "front page of a benign service" {
+		t.Errorf("tronscan.org/ exportable=%v (%q)", root.Exportable, root.NoExport)
+	}
+	if !deep.Exportable {
+		t.Errorf("deep URL on github.com dropped: %q", deep.NoExport)
 	}
 }

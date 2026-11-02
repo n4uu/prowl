@@ -169,3 +169,58 @@ func TestMaxNodes(t *testing.T) {
 		t.Errorf("no max-nodes note with %d nodes", len(g.Nodes))
 	}
 }
+
+// Seeding a real hunt returns hundreds of IOCs. If they counted against
+// -max-nodes, the hunt would stop before its first pivot.
+func TestMaxNodesCountsPivotsOnly(t *testing.T) {
+	g, err := demoHunter(t).Run(context.Background(), nil, Options{Now: now, MaxNodes: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seeds, looked := 0, 0
+	for _, n := range g.Nodes {
+		if n.Depth == 0 {
+			seeds++
+		}
+		// Nodes from parsing a seed ("host of", "port of") need no
+		// lookup; only these come from a pivot.
+		if strings.HasPrefix(n.Via, "URLhaus") || strings.HasPrefix(n.Via, "crt.sh") || strings.HasPrefix(n.Via, "DNS") || strings.HasPrefix(n.Via, "ThreatFox") {
+			looked++
+		}
+	}
+	if seeds < 2 || looked == 0 {
+		t.Errorf("%d seeds, %d nodes from lookups; the budget must not include seeds", seeds, looked)
+	}
+}
+
+// A certificate that expired before the hunt window must not make its other
+// names siblings: real data pulled a company's jenkins and gitlab hosts in
+// from a 2021 certificate on a domain reported in 2026.
+func TestExpiredCertificatesIgnored(t *testing.T) {
+	seed := []ioc.IOC{ioc.MustParse("api.nodecheck-cdn.example")}
+	has := func(g *graph.Graph, v string) bool { _, ok := g.Nodes["domain|"+v]; return ok }
+
+	g, err := demoHunter(t).Run(context.Background(), seed, Options{Now: now, NoSeed: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !has(g, "cdn.nodecheck-cdn.example") {
+		t.Fatal("control: certificate sibling missing with current certificates")
+	}
+
+	later := now.AddDate(2, 0, 0)
+	g, err = demoHunter(t).Run(context.Background(), seed, Options{Now: later, NoSeed: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if has(g, "cdn.nodecheck-cdn.example") {
+		t.Error("sibling from a certificate that expired two years ago was added")
+	}
+	noted := false
+	for _, n := range g.Notes {
+		noted = noted || strings.Contains(n, "expired before the -since window")
+	}
+	if !noted {
+		t.Errorf("no note about ignored certificates: %v", g.Notes)
+	}
+}

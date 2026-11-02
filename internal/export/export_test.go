@@ -119,8 +119,23 @@ func TestSTIXBundleShape(t *testing.T) {
 			}
 		}
 	}
-	if count["indicator"] != 3 || count["malware"] != 3 || count["intrusion-set"] != 1 || count["ipv6-addr"] != 1 {
-		t.Errorf("object counts %v", count)
+	families := map[string]bool{}
+	for _, f := range p.Families {
+		families[f.Name] = true
+	}
+	if count["indicator"] != 3 || count["malware"] != len(families) || count["intrusion-set"] != 1 || count["ipv6-addr"] != 1 {
+		t.Errorf("object counts %v, want %d malware", count, len(families))
+	}
+	for _, o := range b.Objects {
+		if o["type"] != "malware" {
+			continue
+		}
+		refs, _ := o["external_references"].([]any)
+		for _, r := range refs {
+			if u, _ := r.(map[string]any)["url"].(string); u == "" {
+				t.Errorf("malware %v has an external reference without a url", o["name"])
+			}
+		}
 	}
 	for _, o := range b.Objects {
 		if o["type"] != "relationship" {

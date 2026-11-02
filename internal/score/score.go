@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"net/netip"
+	"net/url"
 	"sort"
 	"time"
 
@@ -101,6 +102,14 @@ func structural(n *graph.Node, p *profile.Profile) {
 	if n.Kind == ioc.URL {
 		if pp, why, ok := p.PathMatch(i.Path()); ok {
 			n.AddEvidence(graph.Evidence{Signal: "c2_path", Strength: 1, Source: "profile", Detail: fmt.Sprintf("path %s: %s", pp, why)})
+		}
+		// A deep URL on a legitimate service (a repo, a paste) is a fine
+		// indicator. Its front page is the whole service: ThreatFox has
+		// "https://tronscan.org/" filed under this campaign because
+		// EtherHiding loaders read from the TRON chain.
+		if h, ok := i.Host(); ok && h.Kind == ioc.Domain && p.IsBenign(h.Value) && isRoot(n.Value) {
+			n.AddEvidence(graph.Evidence{Signal: "benign_service", Strength: 1, Source: "profile", Detail: "front page of a well-known legitimate service"})
+			n.Exportable, n.NoExport = false, "front page of a benign service"
 		}
 	}
 	if n.Kind == ioc.Domain {
@@ -197,6 +206,16 @@ func relPhrase(rel string, rev bool) string {
 }
 
 func isShared(n *graph.Node) bool { return !n.Exportable }
+
+// isRoot reports whether a URL points at a site's front page: no path
+// beyond "/", no query.
+func isRoot(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	return (u.Path == "" || u.Path == "/") && u.RawQuery == ""
+}
 
 // clusters adds same-/24 and same-ASN evidence to addresses (and their
 // ip:port children) that sit next to strong nodes.

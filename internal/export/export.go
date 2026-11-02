@@ -264,13 +264,28 @@ func STIX(w io.Writer, g *graph.Graph, p *profile.Profile, opts Options) error {
 	iset := sdo("intrusion-set", p.Actor.Name, map[string]any{
 		"name": p.Actor.Name, "aliases": p.Actor.Aliases, "description": strings.TrimSpace(p.Description),
 	})
+	// A family can be listed once per ThreatFox name (BeaverTail is filed
+	// as js., win. and osx.); STIX gets one malware object per family,
+	// with the Malpedia link from whichever entry has one.
 	malwareIDs := map[string]string{}
+	malpedia := map[string]string{}
 	for _, f := range p.Families {
-		id := sdo("malware", f.Name, map[string]any{
+		if malpedia[f.Name] == "" {
+			malpedia[f.Name] = f.Malpedia
+		}
+	}
+	for _, f := range p.Families {
+		if _, done := malwareIDs[f.Name]; done {
+			continue
+		}
+		props := map[string]any{
 			"name": f.Name, "is_family": true,
-			"malware_types":       []string{"backdoor", "remote-access-trojan"},
-			"external_references": []map[string]string{{"source_name": "malpedia", "url": f.Malpedia}},
-		})
+			"malware_types": []string{"backdoor", "remote-access-trojan"},
+		}
+		if u := malpedia[f.Name]; u != "" {
+			props["external_references"] = []map[string]string{{"source_name": "malpedia", "url": u}}
+		}
+		id := sdo("malware", f.Name, props)
 		malwareIDs[f.Name] = id
 		rel(iset, "uses", id)
 	}

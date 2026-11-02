@@ -25,7 +25,7 @@ import (
 // Options bounds a hunt.
 type Options struct {
 	Depth    int           // pivot hops from a seed (default 2)
-	MaxNodes int           // stop expanding past this many nodes (default 400)
+	MaxNodes int           // stop expanding once pivoting has added this many nodes beyond the seeds (default 400)
 	Since    time.Duration // ignore ThreatFox seed records older than this (default 365d)
 	Limit    int           // records per ThreatFox seed query (default 1000)
 	MaxSANs  int           // skip certificates with more names than this (default 25)
@@ -73,6 +73,8 @@ type Hunter struct {
 	g     *graph.Graph
 	queue []*graph.Node
 	notes map[string]bool
+
+	staleCerts int
 }
 
 // Run executes the hunt and returns the scored graph.
@@ -82,6 +84,7 @@ func (h *Hunter) Run(ctx context.Context, seeds []ioc.IOC, opts Options) (*graph
 	h.g = graph.New(h.Profile.Name)
 	h.g.Started = opts.Now
 	h.notes = map[string]bool{}
+	h.staleCerts = 0
 
 	if !opts.NoSeed {
 		if err := h.seedFromProfile(ctx); err != nil {
@@ -95,6 +98,10 @@ func (h *Hunter) Run(ctx context.Context, seeds []ioc.IOC, opts Options) (*graph
 	if len(h.queue) == 0 {
 		return nil, fmt.Errorf("nothing to hunt from: no seeds given and the profile seed queries returned nothing")
 	}
+	// The budget is for pivoting. Profile seeding alone returns several
+	// hundred IOCs for this campaign; counting them would stop the hunt
+	// before it pivoted once.
+	seeded := len(h.g.Nodes)
 
 	for len(h.queue) > 0 {
 		if err := ctx.Err(); err != nil {
@@ -105,11 +112,14 @@ func (h *Hunter) Run(ctx context.Context, seeds []ioc.IOC, opts Options) (*graph
 		if n.Depth >= opts.Depth {
 			continue
 		}
-		if len(h.g.Nodes) >= opts.MaxNodes {
-			h.note(fmt.Sprintf("stopped expanding at %d nodes (-max-nodes)", opts.MaxNodes))
+		if len(h.g.Nodes)-seeded >= opts.MaxNodes {
+			h.note(fmt.Sprintf("stopped expanding after pivoting added %d nodes to %d seeds (-max-nodes); %d queued nodes not expanded", len(h.g.Nodes)-seeded, seeded, len(h.queue)+1))
 			break
 		}
 		h.expand(ctx, n)
+	}
+	if h.staleCerts > 0 {
+		h.note(fmt.Sprintf("crt.sh: ignored %d certificates that expired before the -since window", h.staleCerts))
 	}
 
 	// ASN and PTR are cheap DNS lookups and they decide whether an address
@@ -149,7 +159,11 @@ func (h *Hunter) warn(src string, err error) {
 		h.note(src + ": some lookups not in the offline cache")
 		return
 	}
-	h.note(fmt.Sprintf("%s: %v", src, err))
+	msg := err.Error()
+	if !strings.HasPrefix(msg, src+":") {
+		msg = src + ": " + msg
+	}
+	h.note(msg)
 }
 
 func (h *Hunter) enqueue(n *graph.Node) { h.queue = append(h.queue, n) }
@@ -414,7 +428,15 @@ func (h *Hunter) certs(ctx context.Context, n *graph.Node, depth int) {
 		return
 	}
 	n.Meta["certificates"] = fmt.Sprint(len(certs))
+	// A certificate that expired before the hunt window says who ran the
+	// domain then, not now. Real case: a domain reported in November 2026
+	// pulled in a company's jenkins and gitlab hosts from a 2021 cert.
+	cutoff := h.opts.Now.Add(-h.opts.Since)
 	for _, c := range certs {
+		if !c.NotAfter.IsZero() && c.NotAfter.Before(cutoff) {
+			h.staleCerts++
+			continue
+		}
 		if len(c.Names) > h.opts.MaxSANs {
 			h.note(fmt.Sprintf("crt.sh: skipped certificate %d with %d names (shared hosting or SaaS)", c.ID, len(c.Names)))
 			continue

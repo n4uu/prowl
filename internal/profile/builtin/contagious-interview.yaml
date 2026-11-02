@@ -37,6 +37,20 @@ families:
   - name: InvisibleFerret
     threatfox: py.invisibleferret
     malpedia: https://malpedia.caad.fkie.fraunhofer.de/details/py.invisibleferret
+  # BeaverTail is also filed per platform. Both names had only VS Code
+  # folderOpen and macOS reports as of November 2026, all tagged
+  # ContagiousInterview by their reporters.
+  - name: BeaverTail
+    threatfox: win.beavertail
+  - name: BeaverTail
+    threatfox: osx.beavertail
+  # Newer families on ThreatFox, every report tagged ContagiousInterview:
+  # OtterCandy (also HardHatRAT, UNSEENMINK) and ContagiousDrop, the VS
+  # Code task / git hook dropper.
+  - name: OtterCandy
+    threatfox: js.ottercandy
+  - name: ContagiousDrop
+    threatfox: js.contagious_drop
 
 # Tags used by ThreatFox and URLhaus reporters for this activity. Matching is
 # case-insensitive and ignores spaces, dashes and underscores.
@@ -45,6 +59,9 @@ tags:
   - BeaverTail
   - InvisibleFerret
   - ContagiousInterview
+  # Same tag for matching, but ThreatFox's taginfo is exact, and about 60
+  # IOCs are only filed under this spelling.
+  - contagious-interview
   - FamousChollima
   - WaterPlum
   - DeceptiveDevelopment
@@ -85,6 +102,9 @@ shared_hosting:
   - ngrok-free.app
   - ngrok.io
   - trycloudflare.com
+  - up.railway.app
+  - jsonsilo.com
+  - mocki.io
 
 # Networks that front for many unrelated customers (CDNs). An address in
 # one of these never inherits a score from a domain that resolves to it,
@@ -110,6 +130,12 @@ benign:
   - ipinfo.io
   - ip-api.com
   - api.ipify.org
+  # Public blockchain explorers and RPC. EtherHiding loaders read their next
+  # stage from a contract or transaction; the address on chain is the
+  # indicator, the explorer never is.
+  - tronscan.org
+  - trongrid.io
+  - bsc-dataseed.binance.org
 
 scoring:
   prior: 0.02          # chance an arbitrary pivoted host belongs to the campaign

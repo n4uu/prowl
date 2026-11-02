@@ -91,7 +91,7 @@ ThreatFox and URLhaus need an abuse.ch Auth-Key in ABUSECH_AUTH_KEY
 type huntFlags struct {
 	profile, seeds, cache, out, since, min, ids, tlp, producer string
 	depth, maxNodes, limit                                     int
-	offline, noSeed, active, verbose, quiet                    bool
+	offline, noSeed, noDNS, active, verbose, quiet             bool
 	ttl                                                        time.Duration
 }
 
@@ -106,12 +106,13 @@ func runHunt(ctx context.Context, args []string, isDemo bool) error {
 	fs.StringVar(&f.seeds, "seeds", "", "file of seed indicators, one per line (defanged is fine)")
 	fs.BoolVar(&f.noSeed, "no-seed", false, "don't query the profile's families and tags; pivot from the given indicators only")
 	fs.IntVar(&f.depth, "depth", 2, "pivot hops from a seed")
-	fs.IntVar(&f.maxNodes, "max-nodes", 400, "stop expanding past this many nodes")
+	fs.IntVar(&f.maxNodes, "max-nodes", 400, "stop expanding once pivoting has added this many nodes beyond the seeds")
 	fs.IntVar(&f.limit, "limit", 1000, "records per ThreatFox seed query")
 	fs.StringVar(&f.since, "since", "365d", "drop ThreatFox seed records not seen within this window (e.g. 90d, 2160h)")
 	fs.StringVar(&f.cache, "cache", defaultCache(), "response cache directory (\"\" to disable)")
 	fs.DurationVar(&f.ttl, "ttl", 0, "treat cache entries older than this as missing (0 = never expire)")
 	fs.BoolVar(&f.offline, "offline", false, "use only the cache; no network at all")
+	fs.BoolVar(&f.noDNS, "no-dns", false, "skip DNS, PTR and Team Cymru lookups (resolving a suspect domain can reach a name server the operator runs)")
 	fs.BoolVar(&f.active, "active", false, "probe ip:port indicators for a live Engine.IO server (sends traffic to the suspected C2)")
 	fs.StringVar(&f.out, "out", "prowl-out", "directory for hunt.json, indicators.csv, misp-event.json, stix-bundle.json, graph.dot")
 	fs.StringVar(&f.min, "min", "likely", "lowest tier exported")
@@ -175,6 +176,13 @@ func runHunt(ctx context.Context, args []string, isDemo bool) error {
 		Profile: p,
 		CrtSh:   &source.CrtSh{C: client},
 		DNS:     dns,
+	}
+	if f.noDNS {
+		if isDemo {
+			return fmt.Errorf("-no-dns makes no sense against the synthetic dataset")
+		}
+		h.DNS = nil
+		fmt.Fprintln(os.Stderr, "prowl: -no-dns: no resolution, no ASN or CDN check; CDN addresses can only be caught by the profile's own lists")
 	}
 	if key != "" || f.offline {
 		h.ThreatFox = &source.ThreatFox{C: client, Key: key}
