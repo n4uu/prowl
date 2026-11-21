@@ -1,0 +1,38 @@
+# Blockchain dead drops used by PolinRider (DPRK, Contagious Interview).
+#
+# The loaders don't carry their C2 or their next stage. They read it from
+# public chains, so the chains are the best telemetry anyone has on the
+# campaign. This file lists what prowl watches; nothing here is fetched
+# from the operator's own servers.
+#
+#   nullreceiver  Ethereum wallets whose zero-value transactions encode the
+#                 C2 in the recipient address: bytes 0-3 and 4-7 are two
+#                 IPv4 addresses, the rest is padding ("helloipbot!!").
+#   tron_indexes  TRON accounts whose memos, hex-decoded and reversed, are
+#                 BSC transaction hashes that carry an XOR-encrypted stage.
+#   bsc_writers   the BSC account that writes those stages. Its nonce says
+#                 whether anything was published since the last check.
+
+name: polinrider
+
+nullreceiver:
+  - address: "0xa322e5f3d311d3080e6f0121063e9adc2490ef1a"
+    label: first NullReceiver wallet (public since August 2026)
+  - address: "0x1eef0849eda15d87f64e51c73c8442cf3c8bcef3"
+    label: second NullReceiver wallet, in the November 2026 fake-font loaders
+
+tron_indexes:
+  - {address: TMfKQEd7TJJa5xNZJZ2Lep838vrzrs7mAP, label: "chain 1 loader"}
+  - {address: TXfxHUet9pJVU1BgVkBAbrES4YUc1nGzcG, label: "chain 2 loader"}
+  - {address: TLmj13VL4p6NQ7jpxz8d9uYY6FUKCYatSe, label: "RAT builds, first stream"}
+  - {address: TA48dct6rFW8BXsiLAtjFaVFoSuryMjD3v, label: "RAT builds, second stream"}
+  - {address: TCqf6ZkaQD84vYsC2cuu1jRwB6JveTaRrF, label: "2026 loaders, chain 1"}
+  - {address: TFMryB9m6d4kBMRjEVyFRbqKSV1cV2NcpH, label: "2026 loaders, chain 2"}
+  - {address: TPDBqDKAYfRVvVYDNZVxY8CRfovkwDaSgW, label: "Python RAT, one-shot"}
+
+bsc_writers:
+  - address: "0x9bc1355344b54dedf3e44296916ed15653844509"
+    label: writes every BSC stage, to the burn address
+    # Nonce of its transaction on 7 October 2026, the last one any TRON
+    # index points to. Anything above known_nonce + 1 is unaccounted for.
+    known_nonce: 297

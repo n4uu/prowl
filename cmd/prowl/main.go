@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/n4uu/prowl/internal/deaddrop"
 	"github.com/n4uu/prowl/internal/demo"
 	"github.com/n4uu/prowl/internal/export"
 	"github.com/n4uu/prowl/internal/graph"
@@ -55,6 +56,8 @@ func main() {
 		err = runProbe(ctx, os.Args[2:])
 	case "profile":
 		err = runProfile(os.Args[2:])
+	case "deaddrop":
+		err = runDeaddrop(ctx, os.Args[2:])
 	case "version", "-version", "--version":
 		fmt.Printf("prowl %s\n", version)
 		return
@@ -81,10 +84,12 @@ usage:
   prowl export -format <fmt> [flags]     re-export a saved hunt: misp, stix, csv, dot, text
   prowl probe <ip:port>...               actively check for a live Engine.IO server (touches the target)
   prowl profile [name|file.yaml]         print a builtin profile, or validate your own
+  prowl deaddrop [flags]                 read the campaign's blockchain dead drops: C2 history, new stages
   prowl version
 
 ThreatFox and URLhaus need an abuse.ch Auth-Key in ABUSECH_AUTH_KEY
-(free at https://auth.abuse.ch/). crt.sh, DNS and Team Cymru need nothing.
+(free at https://auth.abuse.ch/). crt.sh, DNS and Team Cymru need nothing,
+and neither does deaddrop (Blockscout, TronGrid and a public BSC node).
 `)
 }
 
@@ -432,5 +437,59 @@ func runProfile(args []string) error {
 	}
 	fmt.Printf("%s: ok (%d families, %d tags, %d ports, %d paths, %d evidence weights)\n",
 		p.Name, len(p.Families), len(p.Tags), len(p.Ports), len(p.Paths), len(p.Scoring.Evidence))
+	return nil
+}
+
+func runDeaddrop(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("deaddrop", flag.ExitOnError)
+	cfgName := fs.String("config", "polinrider", "builtin dead-drop list or a YAML file")
+	jsonOut := fs.String("json", "", "write the full report as JSON to this file")
+	csvOut := fs.String("csv", "", "write one row per C2 period as CSV to this file")
+	cacheDir := fs.String("cache", "", "cache responses in this directory (replay with -offline)")
+	offline := fs.Bool("offline", false, "use only the cache")
+	quiet := fs.Bool("q", false, "no text summary")
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "usage: prowl deaddrop [flags]\n\nReads public chain APIs only; never fetches or decrypts a stage and never contacts a C2.")
+		fs.PrintDefaults()
+	}
+	fs.Parse(args)
+	cfg, err := deaddrop.Load(*cfgName)
+	if err != nil {
+		return err
+	}
+	var cache source.Cache
+	if *cacheDir != "" {
+		cache = &source.DirCache{Dir: *cacheDir}
+	}
+	c := source.NewClient(cache, *offline)
+	c.UserAgent = "prowl/" + version + " (+https://github.com/n4uu/prowl)"
+	c.MinInterval["eth.blockscout.com"] = 300 * time.Millisecond
+	c.MinInterval["api.trongrid.io"] = 300 * time.Millisecond
+	w := &deaddrop.Watcher{C: c}
+	r := w.Run(ctx, cfg)
+	if !*quiet {
+		deaddrop.WriteText(os.Stdout, r)
+	}
+	if *jsonOut != "" {
+		b, _ := json.MarshalIndent(r, "", "  ")
+		if err := os.WriteFile(*jsonOut, append(b, '\n'), 0o644); err != nil {
+			return err
+		}
+	}
+	if *csvOut != "" {
+		f, err := os.Create(*csvOut)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		if err := deaddrop.WriteCSV(f, r); err != nil {
+			return err
+		}
+	}
+	for _, x := range r.Wallets {
+		if x.Error != "" {
+			return fmt.Errorf("deaddrop: %s: %s", x.Address, x.Error)
+		}
+	}
 	return nil
 }

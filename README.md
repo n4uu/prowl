@@ -221,6 +221,51 @@ The first attempt at this run found these problems, all fixed:
 - The STIX export emitted one malware object per profile entry instead of
   per family, with an empty Malpedia link for families that have none.
 
+## Blockchain dead drops
+
+Some loaders don't carry their C2 at all. They look it up on a public
+chain, which makes the chain the best telemetry there is: every change the
+operator makes is a dated, permanent transaction. `prowl deaddrop` reads
+the ones PolinRider uses and prints what they say.
+
+```
+$ prowl deaddrop -json deaddrops.json -csv c2.csv
+NullReceiver 0x1eef0849eda15d87f64e51c73c8442cf3c8bcef3  (second NullReceiver wallet, ...)
+  347 pointer transactions, 314 on the 1000-block schedule, padding "helloipbot!!"
+  2026-09-04 05:18 .. 2026-09-12 11:21    61 txs  166.88.134[.]75
+  2026-10-14 01:52 .. 2026-10-14 03:18    13 txs  103.179.143[.]219
+  ...
+  2026-11-12 23:44 .. 2026-11-21 14:13    63 txs  95.135.181[.]84  <- current
+  2026-11-11 03:34  in  0.06 ETH  0xf97062cb1b6ffa18b88e9faea373ed288a87ecd0
+
+TRON indexes
+  TCqf6ZkaQD84vYsC2cuu1jRwB6JveTaRrF   28 pointers /  29 txs, last 2026-10-07 16:09  (2026 loaders, chain 1)
+  ...
+
+BSC writer 0x9bc1355344b54dedf3e44296916ed15653844509: next nonce 351, 53 transactions after the last indexed one (nonce 297)
+```
+
+Three kinds of dead drop are understood:
+
+- **NullReceiver** (Ethereum). A zero-value transaction from the operator's
+  wallet to an address that isn't one: bytes 0-3 and 4-7 of the recipient
+  are two IPv4 addresses, the rest is the padding `helloipbot!!`. The loader
+  rounds the chain head down to a multiple of 1000 and only looks at that
+  block and its neighbours, so the operator's bot republishes the current C2
+  there, every 1000 blocks. prowl groups the pointers into C2 periods, counts
+  how many landed on schedule, and lists the ETH that came in or went out,
+  which is how the gas gets paid.
+- **TRON memo indexes.** A memo that hex-decodes and reverses to a BSC
+  transaction hash, the scheme the 2025-2026 PolinRider loaders resolve.
+- **BSC stage writer.** Only the nonce is read. Compared with the last
+  nonce an index points to, it says whether stages are being published that
+  no known index leads to.
+
+The list lives in `internal/deaddrop/builtin/polinrider.yaml`; `-config
+file.yaml` takes your own. Only Blockscout, TronGrid and a public BSC node
+are contacted. Stages are never downloaded or decrypted and the C2 servers
+are never touched, so this is safe to run from CI on a schedule.
+
 ## Reproducible hunts
 
 Every response, HTTP and DNS alike, is cached on disk under its request
@@ -307,6 +352,10 @@ validates the demo's bundle and event with `stix2`, `stix2-patterns` and
   `explain` shows exactly how each one moved a score, but they aren't fitted
   to labelled data. Treat `likely` as "worth an analyst's look", not as a
   verdict.
+- **Dead drops need a wallet to start from.** `deaddrop` follows addresses
+  someone already found in a loader. A new wallet only shows up once a new
+  sample does, and the BSC writer's nonce can say that stages exist, not
+  where they are: a node gives no history by address.
 - **crt.sh is slow and rate-limited.** prowl spaces requests three seconds
   apart and retries 429/5xx with backoff. A cold hunt that pivots through
   many domains takes a while; a cached one takes no time.
