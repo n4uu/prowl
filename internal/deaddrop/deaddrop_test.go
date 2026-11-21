@@ -56,6 +56,16 @@ func TestDecodeMemo(t *testing.T) {
 	}
 }
 
+func TestDecodeStagePointer(t *testing.T) {
+	sp, err := DecodeStagePointer("0x07b2bf3d6b07d96c1c3107d96d59280783e08100")
+	if err != nil || sp.Block != 129154877 || sp.Index != 107 {
+		t.Fatalf("got %+v %v", sp, err)
+	}
+	if !OnSchedule256(26464261) || OnSchedule256(26464264) {
+		t.Fatal("256-block schedule")
+	}
+}
+
 func TestOnSchedule(t *testing.T) {
 	for b, want := range map[uint64]bool{26464000: true, 26463999: true, 26464001: true, 26464002: false, 26187571: false} {
 		if OnSchedule(b) != want {
@@ -100,10 +110,21 @@ func (f *fakeChains) handler(t *testing.T) http.Handler {
 	})
 	mux.HandleFunc("/bsc", func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
-		if !bytes.Contains(b, []byte("eth_getTransactionCount")) {
+		switch {
+		case bytes.Contains(b, []byte("eth_getTransactionCount")):
+			fmt.Fprintf(w, `{"jsonrpc":"2.0","id":1,"result":%q}`, f.nonc)
+		case bytes.Contains(b, []byte("eth_getBlockByNumber")):
+			// block 0x07b2bf3d: transaction 107 is the stage
+			txs := make([]string, 120)
+			for i := range txs {
+				txs[i] = fmt.Sprintf("0x%064x", 1000+i)
+			}
+			json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": 1, "result": map[string]any{"transactions": txs}})
+		case bytes.Contains(b, []byte("eth_getTransactionByHash")):
+			fmt.Fprint(w, `{"jsonrpc":"2.0","id":1,"result":{"from":"0x9BC1355344B54DEDF3E44296916ED15653844509","nonce":"0x152"}}`)
+		default:
 			t.Errorf("unexpected rpc %s", b)
 		}
-		fmt.Fprintf(w, `{"jsonrpc":"2.0","id":1,"result":%q}`, f.nonc)
 	})
 	return mux
 }
@@ -136,6 +157,9 @@ func TestWatcher(t *testing.T) {
 		page: 2,
 		nonc: "0x15f",
 	}
+	const ixWallet = "0x596dcc9fda875309ff85eba09cf5a97d8c7691bb"
+	stage := "0x07b2bf3d6b07d96c1c3107d96d59280783e08100"
+	f.eth[ixWallet] = []ethTx{tx(26464261, 1788540500, ixWallet, stage, "100"), tx(26464005, 1788540000, ixWallet, stage, "100"), tx(26464100, 1788540100, ixWallet, stage, "0")}
 	idx := "TQqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq"
 	for i := 0; i < 5; i++ {
 		var x tronTx
@@ -154,6 +178,7 @@ func TestWatcher(t *testing.T) {
 	cfg := &Config{
 		Name:         "test",
 		NullReceiver: []Watch{{Address: wallet, Label: "w"}},
+		BSCIndexes:   []Watch{{Address: ixWallet, Label: "ix"}},
 		TronIndexes:  []Watch{{Address: idx, Label: "i"}},
 		BSCWriters:   []BSCWriter{{Address: "0x9bc1355344b54dedf3e44296916ed15653844509", Label: "b", KnownNonce: 297}},
 	}
@@ -188,14 +213,22 @@ func TestWatcher(t *testing.T) {
 		t.Fatalf("tron last = %v", tr.Last)
 	}
 
+	ir := r.Indexes[0]
+	if ir.Error != "" || ir.Pointers != 3 || ir.OnSchedule != 2 || len(ir.Stages) != 1 {
+		t.Fatalf("index = %+v", ir)
+	}
+	if st := ir.Stages[0]; st.BSCBlock != 129154877 || st.TxIndex != 107 || st.BSCTx != fmt.Sprintf("0x%064x", 1107) || st.Nonce != 338 || st.Sender != "0x9bc1355344b54dedf3e44296916ed15653844509" {
+		t.Fatalf("stage = %+v", st)
+	}
+
 	br := r.Writers[0]
-	if br.Error != "" || br.Nonce != 351 || br.Unaccounted != 53 {
+	if br.Error != "" || br.Nonce != 351 || br.Unaccounted != 52 || len(br.Indexed) != 1 || br.Indexed[0] != 338 {
 		t.Fatalf("writer = %+v", br)
 	}
 
 	var text, csvOut bytes.Buffer
 	WriteText(&text, r)
-	if !strings.Contains(text.String(), "198.51.100[.]7  <- current") || !strings.Contains(text.String(), "53 transactions after the last indexed one") {
+	if !strings.Contains(text.String(), "198.51.100[.]7  <- current") || !strings.Contains(text.String(), "52 transactions after nonce 297 that no watched index points to (indexed from Ethereum: [338])") {
 		t.Fatalf("text:\n%s", text.String())
 	}
 	if err := WriteCSV(&csvOut, r); err != nil {
@@ -223,6 +256,9 @@ func TestBuiltinConfig(t *testing.T) {
 		if x.Label == "" || strings.Contains(x.Label, "}") {
 			t.Errorf("label for %s parsed as %q", x.Address, x.Label)
 		}
+	}
+	if len(c.BSCIndexes) != 1 {
+		t.Fatalf("bsc indexes = %+v", c.BSCIndexes)
 	}
 	if len(c.NullReceiver) != 2 || len(c.TronIndexes) != 7 || len(c.BSCWriters) != 1 || c.BSCWriters[0].KnownNonce != 297 {
 		t.Fatalf("config = %+v", c)

@@ -83,3 +83,28 @@ func OnSchedule(block uint64) bool {
 	m := block % 1000
 	return m == 0 || m == 1 || m == 999
 }
+
+// StagePointer is what a BSC-index recipient address decodes to.
+type StagePointer struct {
+	Block uint64 // BSC block number
+	Index int    // transaction index in that block
+}
+
+// DecodeStagePointer reads a BSC block number (bytes 0-3, big endian) and a
+// transaction index (byte 4) out of an Ethereum address, the way the
+// October 2026 loaders do. The remaining bytes are filler.
+func DecodeStagePointer(to string) (StagePointer, error) {
+	s := strings.TrimPrefix(strings.ToLower(to), "0x")
+	b, err := hex.DecodeString(s)
+	if err != nil || len(b) != 20 {
+		return StagePointer{}, fmt.Errorf("not an address: %q", to)
+	}
+	return StagePointer{Block: uint64(b[0])<<24 | uint64(b[1])<<16 | uint64(b[2])<<8 | uint64(b[3]), Index: int(b[4])}, nil
+}
+
+// OnSchedule256 reports whether an Ethereum block is one the October 2026
+// loaders check: a multiple of 256, plus 5, and the two blocks after it.
+func OnSchedule256(block uint64) bool {
+	m := block % 256
+	return m >= 5 && m <= 7
+}

@@ -102,8 +102,10 @@ type WriterReport struct {
 	KnownNonce uint64 `json:"known_nonce"`
 	// Unaccounted is how many transactions the writer sent after the last
 	// one any watched index points to.
-	Unaccounted int64  `json:"unaccounted"`
-	Error       string `json:"error,omitempty"`
+	Unaccounted int64 `json:"unaccounted"`
+	// Indexed lists nonces above KnownNonce that an Ethereum index points to.
+	Indexed []uint64 `json:"indexed,omitempty"`
+	Error   string   `json:"error,omitempty"`
 }
 
 // Report is the whole watch.
@@ -111,6 +113,7 @@ type Report struct {
 	Name      string         `json:"name"`
 	Generated time.Time      `json:"generated"`
 	Wallets   []WalletReport `json:"nullreceiver"`
+	Indexes   []IndexReport  `json:"bsc_indexes"`
 	Tron      []TronReport   `json:"tron_indexes"`
 	Writers   []WriterReport `json:"bsc_writers"`
 }
@@ -127,11 +130,24 @@ func (w *Watcher) Run(ctx context.Context, cfg *Config) *Report {
 	for _, x := range cfg.NullReceiver {
 		r.Wallets = append(r.Wallets, w.wallet(ctx, e, x, r.Generated))
 	}
+	for _, x := range cfg.BSCIndexes {
+		r.Indexes = append(r.Indexes, w.index(ctx, e, x, r.Generated))
+	}
 	for _, x := range cfg.TronIndexes {
 		r.Tron = append(r.Tron, w.tron(ctx, e, x))
 	}
 	for _, x := range cfg.BSCWriters {
-		r.Writers = append(r.Writers, w.writer(ctx, e, x))
+		wr := w.writer(ctx, e, x)
+		// Stages an Ethereum index points to are accounted for.
+		for _, ix := range r.Indexes {
+			for _, st := range ix.Stages {
+				if st.Sender == wr.Address && st.Nonce > x.KnownNonce && st.Nonce < wr.Nonce {
+					wr.Unaccounted--
+					wr.Indexed = append(wr.Indexed, st.Nonce)
+				}
+			}
+		}
+		r.Writers = append(r.Writers, wr)
 	}
 	return r
 }
@@ -334,5 +350,128 @@ func (w *Watcher) writer(ctx context.Context, e Endpoints, x BSCWriter) WriterRe
 	// eth_getTransactionCount is the next nonce, so the last sent one is n-1.
 	rep.Nonce = n
 	rep.Unaccounted = int64(n) - int64(x.KnownNonce) - 1
+	return rep
+}
+
+// Stage is one BSC transaction an index wallet pointed to.
+type Stage struct {
+	BSCBlock uint64    `json:"bsc_block"`
+	TxIndex  int       `json:"tx_index"`
+	BSCTx    string    `json:"bsc_tx,omitempty"`
+	Sender   string    `json:"sender,omitempty"`
+	Nonce    uint64    `json:"nonce"`
+	First    time.Time `json:"first"`
+	Last     time.Time `json:"last"`
+	Pointers int       `json:"pointers"`
+}
+
+// IndexReport is one BSC-index wallet.
+type IndexReport struct {
+	Address    string  `json:"address"`
+	Label      string  `json:"label"`
+	Pointers   int     `json:"pointers"`
+	OnSchedule int     `json:"on_schedule"`
+	Stages     []Stage `json:"stages"`
+	Active     bool    `json:"active"`
+	Error      string  `json:"error,omitempty"`
+}
+
+func (w *Watcher) bscRPC(ctx context.Context, e Endpoints, method string, params ...any) (json.RawMessage, error) {
+	body, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
+	raw, _, err := w.C.Do(ctx, source.Request{Method: http.MethodPost, URL: e.BSCRPC, Body: body,
+		Header: http.Header{"Content-Type": {"application/json"}}})
+	if err != nil {
+		return nil, err
+	}
+	var resp struct {
+		Result json.RawMessage `json:"result"`
+		Error  *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return nil, fmt.Errorf("bsc rpc: %w", err)
+	}
+	if resp.Error != nil {
+		return nil, fmt.Errorf("bsc rpc: %s", resp.Error.Message)
+	}
+	return resp.Result, nil
+}
+
+func hexUint(s string) uint64 {
+	n, _ := strconv.ParseUint(strings.TrimPrefix(s, "0x"), 16, 64)
+	return n
+}
+
+func (w *Watcher) index(ctx context.Context, e Endpoints, x Watch, now time.Time) IndexReport {
+	rep := IndexReport{Address: strings.ToLower(x.Address), Label: x.Label, Stages: []Stage{}}
+	txs, err := w.ethTxs(ctx, e, rep.Address)
+	if err != nil {
+		rep.Error = err.Error()
+		return rep
+	}
+	pos := map[[2]uint64]int{}
+	for _, t := range txs {
+		// Unlike NullReceiver these pointers carry a token amount (100 wei),
+		// so any outgoing, successful transaction counts.
+		if strings.ToLower(t.From) != rep.Address || t.IsError == "1" {
+			continue
+		}
+		sp, err := DecodeStagePointer(t.To)
+		if err != nil {
+			continue
+		}
+		block, _ := strconv.ParseUint(t.Block, 10, 64)
+		ts := unix(t.TimeStamp)
+		rep.Pointers++
+		if OnSchedule256(block) {
+			rep.OnSchedule++
+		}
+		k := [2]uint64{sp.Block, uint64(sp.Index)}
+		i, ok := pos[k]
+		if !ok {
+			i = len(rep.Stages)
+			pos[k] = i
+			rep.Stages = append(rep.Stages, Stage{BSCBlock: sp.Block, TxIndex: sp.Index, First: ts})
+		}
+		rep.Stages[i].Last = ts
+		rep.Stages[i].Pointers++
+	}
+	for i := range rep.Stages {
+		st := &rep.Stages[i]
+		raw, err := w.bscRPC(ctx, e, "eth_getBlockByNumber", fmt.Sprintf("0x%x", st.BSCBlock), false)
+		if err != nil {
+			rep.Error = err.Error()
+			continue
+		}
+		var blk struct {
+			Transactions []string `json:"transactions"`
+		}
+		if json.Unmarshal(raw, &blk) != nil || st.TxIndex >= len(blk.Transactions) {
+			continue
+		}
+		st.BSCTx = blk.Transactions[st.TxIndex]
+		raw, err = w.bscRPC(ctx, e, "eth_getTransactionByHash", st.BSCTx)
+		if err != nil {
+			rep.Error = err.Error()
+			continue
+		}
+		var tx struct {
+			From  string `json:"from"`
+			Nonce string `json:"nonce"`
+		}
+		if json.Unmarshal(raw, &tx) == nil {
+			st.Sender, st.Nonce = strings.ToLower(tx.From), hexUint(tx.Nonce)
+		}
+	}
+	if n := len(rep.Stages); n > 0 {
+		last := rep.Stages[0].Last
+		for _, s := range rep.Stages {
+			if s.Last.After(last) {
+				last = s.Last
+			}
+		}
+		rep.Active = now.Sub(last) < 24*time.Hour
+	}
 	return rep
 }

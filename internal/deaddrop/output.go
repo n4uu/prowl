@@ -43,6 +43,16 @@ func WriteText(out io.Writer, r *Report) {
 			fmt.Fprintf(out, "  %s  %-3s %s ETH  %s\n", t.Time.Format("2006-01-02 15:04"), t.Direction, t.ValueETH, t.Peer)
 		}
 	}
+	for _, x := range r.Indexes {
+		fmt.Fprintf(out, "\nBSC index %s  (%s)\n", x.Address, x.Label)
+		if x.Error != "" {
+			fmt.Fprintf(out, "  error: %s\n", x.Error)
+		}
+		fmt.Fprintf(out, "  %d pointer transactions, %d on the 256-block schedule, active %v\n", x.Pointers, x.OnSchedule, x.Active)
+		for _, st := range x.Stages {
+			fmt.Fprintf(out, "  %s .. %s  %4d txs  BSC block %d #%d  %s  nonce %d\n", st.First.Format("2006-01-02 15:04"), st.Last.Format("2006-01-02 15:04"), st.Pointers, st.BSCBlock, st.TxIndex, st.BSCTx, st.Nonce)
+		}
+	}
 	if len(r.Tron) > 0 {
 		fmt.Fprintf(out, "\nTRON indexes\n")
 	}
@@ -62,7 +72,11 @@ func WriteText(out io.Writer, r *Report) {
 			fmt.Fprintf(out, "\nBSC writer %s  error: %s\n", b.Address, b.Error)
 			continue
 		}
-		fmt.Fprintf(out, "\nBSC writer %s: next nonce %d, %d transactions after the last indexed one (nonce %d)\n", b.Address, b.Nonce, b.Unaccounted, b.KnownNonce)
+		fmt.Fprintf(out, "\nBSC writer %s: next nonce %d, %d transactions after nonce %d that no watched index points to", b.Address, b.Nonce, b.Unaccounted, b.KnownNonce)
+		if len(b.Indexed) > 0 {
+			fmt.Fprintf(out, " (indexed from Ethereum: %v)", b.Indexed)
+		}
+		fmt.Fprintln(out)
 	}
 }
 

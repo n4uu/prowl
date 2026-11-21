@@ -22,10 +22,14 @@ var builtin embed.FS
 
 // Config is what to watch.
 type Config struct {
-	Name         string      `yaml:"name"`
-	NullReceiver []Watch     `yaml:"nullreceiver"`
-	TronIndexes  []Watch     `yaml:"tron_indexes"`
-	BSCWriters   []BSCWriter `yaml:"bsc_writers"`
+	Name         string  `yaml:"name"`
+	NullReceiver []Watch `yaml:"nullreceiver"`
+	// BSCIndexes are Ethereum wallets whose recipient addresses point to a
+	// BSC transaction: bytes 0-3 are a block number, byte 4 the index of the
+	// transaction in that block.
+	BSCIndexes  []Watch     `yaml:"bsc_indexes"`
+	TronIndexes []Watch     `yaml:"tron_indexes"`
+	BSCWriters  []BSCWriter `yaml:"bsc_writers"`
 }
 
 // Watch is one address and why it is on the list.
@@ -58,6 +62,11 @@ func Load(nameOrPath string) (*Config, error) {
 		return nil, fmt.Errorf("deaddrop config %q: %w", nameOrPath, err)
 	}
 	for _, w := range c.NullReceiver {
+		if !isEthAddress(w.Address) {
+			return nil, fmt.Errorf("deaddrop config: %q is not an Ethereum address", w.Address)
+		}
+	}
+	for _, w := range c.BSCIndexes {
 		if !isEthAddress(w.Address) {
 			return nil, fmt.Errorf("deaddrop config: %q is not an Ethereum address", w.Address)
 		}

@@ -10,6 +10,9 @@
 #                 IPv4 addresses, the rest is padding ("helloipbot!!").
 #   tron_indexes  TRON accounts whose memos, hex-decoded and reversed, are
 #                 BSC transaction hashes that carry an XOR-encrypted stage.
+#   bsc_indexes   Ethereum wallets that replaced the TRON indexes on 7 October
+#                 2026: the recipient address holds a BSC block number (bytes
+#                 0-3) and the index of the stage transaction in it (byte 4).
 #   bsc_writers   the BSC account that writes those stages. Its nonce says
 #                 whether anything was published since the last check.
 
@@ -20,6 +23,10 @@ nullreceiver:
     label: first NullReceiver wallet (public since August 2026)
   - address: "0x1eef0849eda15d87f64e51c73c8442cf3c8bcef3"
     label: second NullReceiver wallet, in the November 2026 fake-font loaders
+
+bsc_indexes:
+  - address: "0x596dcc9fda875309ff85eba09cf5a97d8c7691bb"
+    label: Ethereum index for BSC stages, from the 7 October 2026 loaders
 
 tron_indexes:
   - {address: TMfKQEd7TJJa5xNZJZ2Lep838vrzrs7mAP, label: "chain 1 loader"}
