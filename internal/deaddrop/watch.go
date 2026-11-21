@@ -412,7 +412,7 @@ func (w *Watcher) index(ctx context.Context, e Endpoints, x Watch, now time.Time
 	}
 	pos := map[[2]uint64]int{}
 	for _, t := range txs {
-		// Unlike NullReceiver these pointers carry a token amount (100 wei),
+		// Unlike NullReceiver these pointers carry a token amount (500 wei),
 		// so any outgoing, successful transaction counts.
 		if strings.ToLower(t.From) != rep.Address || t.IsError == "1" {
 			continue

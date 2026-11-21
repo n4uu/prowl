@@ -261,7 +261,7 @@ Four kinds of dead drop are understood:
   how many landed on schedule, and lists the ETH that came in or went out,
   which is how the gas gets paid.
 - **Ethereum index for BSC stages.** What replaced TRON on 7 October 2026.
-  The index wallet sends 100 wei to an address whose bytes 0-3 are a BSC
+  The index wallet sends 500 wei to an address whose bytes 0-3 are a BSC
   block number and byte 4 the position of the stage transaction in that
   block, on a 256-block schedule. prowl resolves every pointer to the BSC
   transaction and the writer nonce it carries.
