@@ -242,10 +242,15 @@ TRON indexes
   TCqf6ZkaQD84vYsC2cuu1jRwB6JveTaRrF   28 pointers /  29 txs, last 2026-10-07 16:09  (2026 loaders, chain 1)
   ...
 
-BSC writer 0x9bc1355344b54dedf3e44296916ed15653844509: next nonce 351, 53 transactions after the last indexed one (nonce 297)
+BSC index 0x596dcc9fda875309ff85eba09cf5a97d8c7691bb  (Ethereum index for BSC stages, ...)
+  1289 pointer transactions, 1085 on the 256-block schedule, active true
+  ...
+  2026-10-22 16:01 .. 2026-11-21 15:58   841 txs  BSC block 129154877 #107  0x86fa4b3c...  nonce 338
+
+BSC writer 0x9bc1355344b54dedf3e44296916ed15653844509: next nonce 351, 51 transactions after nonce 297 that no watched index points to (indexed from Ethereum: [325 338])
 ```
 
-Three kinds of dead drop are understood:
+Four kinds of dead drop are understood:
 
 - **NullReceiver** (Ethereum). A zero-value transaction from the operator's
   wallet to an address that isn't one: bytes 0-3 and 4-7 of the recipient
@@ -255,11 +260,17 @@ Three kinds of dead drop are understood:
   there, every 1000 blocks. prowl groups the pointers into C2 periods, counts
   how many landed on schedule, and lists the ETH that came in or went out,
   which is how the gas gets paid.
+- **Ethereum index for BSC stages.** What replaced TRON on 7 October 2026.
+  The index wallet sends 100 wei to an address whose bytes 0-3 are a BSC
+  block number and byte 4 the position of the stage transaction in that
+  block, on a 256-block schedule. prowl resolves every pointer to the BSC
+  transaction and the writer nonce it carries.
 - **TRON memo indexes.** A memo that hex-decodes and reverses to a BSC
   transaction hash, the scheme the 2025-2026 PolinRider loaders resolve.
 - **BSC stage writer.** Only the nonce is read. Compared with the last
   nonce an index points to, it says whether stages are being published that
-  no known index leads to.
+  no known index leads to. Stages an Ethereum index resolves to are
+  subtracted.
 
 The list lives in `internal/deaddrop/builtin/polinrider.yaml`; `-config
 file.yaml` takes your own. Only Blockscout, TronGrid and a public BSC node
